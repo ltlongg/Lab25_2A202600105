@@ -71,14 +71,13 @@ different 4-digit numbers (years, IDs), preventing stale date-sensitive answers.
 
 | SLI | SLO target | Actual value | Met? |
 |---|---|---:|---|
-| Availability | >= 99% | 99.5% | ✅ |
-| Latency P95 | < 2500 ms | 484.88 ms | ✅ |
-| Fallback success rate | >= 95% | 95.56% | ✅ |
-| Cache hit rate | >= 10% | 77.25% | ✅ |
-| Recovery time | < 5000 ms | 2312.95 ms | ✅ |
+| Availability | >= 99% | 99.75% | ✅ |
+| Latency P95 | < 2500 ms | 490.29 ms | ✅ |
+| Fallback success rate | >= 95% | 97.83% | ✅ |
+| Cache hit rate | >= 10% | 79.00% | ✅ |
+| Recovery time | < 5000 ms | 2207.59 ms | ✅ |
 
-All five SLOs are met. The system is particularly strong on cache hit rate (77.25%) and
-latency P95 (484.88 ms), both well within targets.
+All five SLOs are met.
 
 ---
 
@@ -88,19 +87,19 @@ Full run across 4 chaos scenarios (400 total requests):
 
 | Metric | Value |
 |---|---:|
-| availability | 0.9950 (99.5%) |
-| error_rate | 0.0050 (0.5%) |
-| latency_p50_ms | 0.22 |
-| latency_p95_ms | 484.88 |
-| latency_p99_ms | 528.90 |
-| fallback_success_rate | 0.9556 (95.56%) |
-| cache_hit_rate | 0.7725 (77.25%) |
-| estimated_cost | $0.04271 |
-| estimated_cost_saved | $0.309 |
-| circuit_open_count | 4 |
-| recovery_time_ms | 2312.95 |
+| availability | 0.9975 (99.75%) |
+| error_rate | 0.0025 (0.25%) |
+| latency_p50_ms | 0.36 |
+| latency_p95_ms | 490.29 |
+| latency_p99_ms | 531.16 |
+| fallback_success_rate | 0.9783 (97.83%) |
+| cache_hit_rate | 0.7900 (79.00%) |
+| estimated_cost | $0.038474 |
+| estimated_cost_saved | $0.316 |
+| circuit_open_count | 5 |
+| recovery_time_ms | 2207.59 |
 
-The very low P50 (0.22 ms) reflects ~77% of requests being served from the in-memory cache
+The very low P50 (0.36 ms) reflects ~79% of requests being served from the in-memory cache
 with sub-millisecond lookups. P95/P99 represent real provider calls (180–260 ms base
 latency + occasional slow paths).
 
@@ -108,18 +107,17 @@ latency + occasional slow paths).
 
 ## 5. Cache comparison
 
-Measured on the `all_healthy` scenario (100 requests, both providers at 0% fail rate):
+Measured over 30 requests with both providers at default fail rates:
 
 | Metric | Without cache | With cache | Delta |
 |---|---:|---:|---|
-| latency_p50_ms | 230.59 | 0.57 | -99.8% |
-| latency_p95_ms | 515.48 | 250.86 | -51.4% |
-| estimated_cost | $0.0489 | $0.0121 | -75.3% |
-| cache_hit_rate | 0.0 | 0.78 | +78 pp |
+| latency_p50_ms | 274.94 | 0.49 | -99.8% |
+| latency_p95_ms | 501.36 | 483.65 | -3.5% |
+| estimated_cost | $0.012188 | $0.006036 | -50.5% |
+| cache_hit_rate | 0.0 | 0.6333 | +63.3 pp |
 
-The cache delivers a 75% cost reduction and nearly eliminates median latency by serving
-repeated or semantically-similar queries locally. High similarity threshold (0.92) keeps
-precision high — no false hits observed in the healthy baseline.
+The cache delivers a ~50% cost reduction and eliminates median latency entirely (sub-ms vs
+275 ms). High similarity threshold (0.92) keeps precision high — no false hits observed.
 
 ---
 
@@ -198,11 +196,20 @@ deployments the warm-cache benefit across the fleet far outweighs this overhead.
 
 | Scenario | Expected behavior | Observed behavior | Pass/Fail |
 |---|---|---|---|
-| primary_timeout_100 | All traffic fallback to backup; circuit opens ≥ 1× | 100% fallback to backup; circuit opened 2× | ✅ pass |
-| primary_flaky_50 | Circuit oscillates; mix of primary + fallback routes | Circuit opened 1×; ~50% primary, ~50% fallback | ✅ pass |
-| cache_stale_candidate | Cache serves hits; false-hit guard blocks year mismatches | Cache served; false-hit guard fired on date-diff queries | ✅ pass |
-| all_healthy | Near-perfect availability; no static fallbacks | 99%+ availability; zero static fallbacks | ✅ pass |
-| cache_vs_nocache | Cached run has higher hit rate than no-cache baseline | 77.25% vs 0% — cost saved $0.309 | ✅ pass |
+| primary_timeout_100 | All traffic fallback to backup; circuit opens ≥ 1× | fallback_success_rate=100%, circuit_open_count=3, cache_hit_rate=80% | ✅ pass |
+| primary_flaky_50 | Circuit oscillates; mix of primary + fallback routes | fallback_success_rate=100%, circuit_open_count=1, recovery_time=2208 ms | ✅ pass |
+| cache_stale_candidate | Cache serves hits; false-hit guard blocks year mismatches | cache_hit_rate=81%, false-hit guard fired on date-diff queries | ✅ pass |
+| all_healthy | Near-perfect availability; no static fallbacks | availability=100%, cache_hit_rate=76%, circuit_open_count=1 | ✅ pass |
+| cache_vs_nocache | Cached run has higher hit rate than no-cache baseline | 63.33% vs 0% — cost saved 50.5% | ✅ pass |
+
+### Scenario details (from metrics.json)
+
+| Scenario | Availability | Fallback rate | Cache hit rate | Circuit opens | Static fallbacks |
+|---|---:|---:|---:|---:|---:|
+| primary_timeout_100 | 100% | 100% | 80% | 3 | 0 |
+| primary_flaky_50 | 100% | 100% | 79% | 1 | 0 |
+| cache_stale_candidate | 99% | 83.33% | 81% | 0 | 1 |
+| all_healthy | 100% | 100% | 76% | 1 | 0 |
 
 All 5 scenarios pass. The `cache_stale_candidate` scenario validated the combined
 TF-IDF + Jaccard similarity approach: without the Jaccard fallback, shared-token queries
